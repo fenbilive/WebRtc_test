@@ -13,6 +13,7 @@
 *.target.mk
 *.targets
 *.user
+*xcuserdata/
 *.vcproj
 *.vcxproj
 *.vcxproj.filters
@@ -23,6 +24,7 @@
 *_proto.xml
 *_proto_cpp.xml
 *~
+.gclient
 .*.sw?
 .cipd
 .clangd
