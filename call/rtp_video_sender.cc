@@ -231,7 +231,7 @@ std::vector<RtpStreamSender> CreateRtpStreamSenders(
   std::vector<RtpStreamSender> rtp_streams;
 
   RTC_DCHECK(rtp_config.rtx.ssrcs.empty() ||
-             rtp_config.rtx.ssrcs.size() == rtp_config.rtx.ssrcs.size());
+             rtp_config.rtx.ssrcs.size() == rtp_config.ssrcs.size());
   for (size_t i = 0; i < rtp_config.ssrcs.size(); ++i) {
     RTPSenderVideo::Config video_config;
     configuration.local_media_ssrc = rtp_config.ssrcs[i];
@@ -241,9 +241,10 @@ std::vector<RtpStreamSender> CreateRtpStreamSenders(
     configuration.fec_generator = fec_generator.get();
     video_config.fec_generator = fec_generator.get();
 
-    if (rtp_config.rtx.ssrcs.size() > i) {
-      configuration.rtx_send_ssrc = rtp_config.rtx.ssrcs[i];
-    }
+    configuration.rtx_send_ssrc =
+        rtp_config.GetRtxSsrcAssociatedWithMediaSsrc(rtp_config.ssrcs[i]);
+    RTC_DCHECK_EQ(configuration.rtx_send_ssrc.has_value(),
+                  !rtp_config.rtx.ssrcs.empty());
 
     configuration.need_rtp_packet_infos = rtp_config.lntf.enabled;
 
@@ -272,7 +273,7 @@ std::vector<RtpStreamSender> CreateRtpStreamSenders(
         rtp_config.ulpfec.red_payload_type != -1) {
       video_config.red_payload_type = rtp_config.ulpfec.red_payload_type;
     }
-    video_config.frame_transformer = std::move(frame_transformer);
+    video_config.frame_transformer = frame_transformer;
     auto sender_video = std::make_unique<RTPSenderVideo>(video_config);
     rtp_streams.emplace_back(std::move(rtp_rtcp), std::move(sender_video),
                              std::move(fec_generator));

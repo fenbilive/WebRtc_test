@@ -51,6 +51,19 @@ namespace cricket {
 
 class WebRtcVideoChannel;
 
+// Public for testing.
+// Inputs StreamStats for all types of substreams (kMedia, kRtx, kFlexfec) and
+// merges any non-kMedia substream stats object into its referenced kMedia-type
+// substream. The resulting substreams are all kMedia. This means, for example,
+// that packet and byte counters of RTX and FlexFEC streams are accounted for in
+// the relevant RTP media stream's stats. This makes the resulting StreamStats
+// objects ready to be turned into "outbound-rtp" stats objects for GetStats()
+// which does not create separate stream stats objects for complementary
+// streams.
+std::map<uint32_t, webrtc::VideoSendStream::StreamStats>
+MergeInfoAboutOutboundRtpSubstreamsForTesting(
+    const std::map<uint32_t, webrtc::VideoSendStream::StreamStats>& substreams);
+
 class UnsignalledSsrcHandler {
  public:
   enum Action {
@@ -97,7 +110,8 @@ class WebRtcVideoEngine : public VideoEngineInterface {
       webrtc::VideoBitrateAllocatorFactory* video_bitrate_allocator_factory)
       override;
 
-  std::vector<VideoCodec> codecs() const override;
+  std::vector<VideoCodec> send_codecs() const override;
+  std::vector<VideoCodec> recv_codecs() const override;
   std::vector<webrtc::RtpHeaderExtensionCapability> GetRtpHeaderExtensions()
       const override;
 
@@ -605,6 +619,10 @@ class WebRtcVideoChannel : public VideoMediaChannel,
   // Per peer connection crypto options that last for the lifetime of the peer
   // connection.
   const webrtc::CryptoOptions crypto_options_ RTC_GUARDED_BY(thread_checker_);
+
+  // Optional frame transformer set on unsignaled streams.
+  rtc::scoped_refptr<webrtc::FrameTransformerInterface>
+      unsignaled_frame_transformer_ RTC_GUARDED_BY(thread_checker_);
 
   // Buffer for unhandled packets.
   std::unique_ptr<UnhandledPacketsBuffer> unknown_ssrc_packet_buffer_

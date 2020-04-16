@@ -1717,24 +1717,24 @@ TEST_P(PacingControllerTest, TaskLate) {
   pacer_->ProcessPackets();
 
   Timestamp next_send_time = pacer_->NextSendTime();
+  // Determine time between packets (ca 62ms)
   const TimeDelta time_between_packets = next_send_time - clock_.CurrentTime();
 
   // Simulate a late process call, executed just before we allow sending the
   // fourth packet.
-  clock_.AdvanceTime((time_between_packets * 3) -
-                     (PacingController::kMinSleepTime + TimeDelta::Millis(1)));
+  const TimeDelta kOffset = TimeDelta::Millis(1);
+  clock_.AdvanceTime((time_between_packets * 3) - kOffset);
 
   EXPECT_CALL(callback_, SendPacket).Times(2);
   pacer_->ProcessPackets();
 
-  // Check that next scheduled send time is within sleep-time + 1ms.
+  // Check that next scheduled send time is in ca 1ms.
   next_send_time = pacer_->NextSendTime();
-  EXPECT_LE(next_send_time - clock_.CurrentTime(),
-            PacingController::kMinSleepTime + TimeDelta::Millis(1));
+  const TimeDelta time_left = next_send_time - clock_.CurrentTime();
+  EXPECT_EQ(time_left.RoundTo(TimeDelta::Millis(1)), kOffset);
 
-  // Advance to within error margin for execution.
-  clock_.AdvanceTime(TimeDelta::Millis(1));
-  EXPECT_CALL(callback_, SendPacket).Times(1);
+  clock_.AdvanceTime(time_left);
+  EXPECT_CALL(callback_, SendPacket);
   pacer_->ProcessPackets();
 }
 
@@ -1765,6 +1765,222 @@ TEST_P(PacingControllerTest, NoProbingWhilePaused) {
 
   EXPECT_EQ(pacer_->NextSendTime() - clock_.CurrentTime(),
             PacingController::kPausedProcessInterval);
+}
+
+TEST_P(PacingControllerTest, AudioNotPacedEvenWhenAccountedFor) {
+  const uint32_t kSsrc = 12345;
+  uint16_t sequence_number = 1234;
+  const size_t kPacketSize = 123;
+
+  // Account for audio - so that audio packets can cause pushback on other
+  // types such as video. Audio packet should still be immediated passed
+  // through though ("WebRTC-Pacer-BlockAudio" needs to be enabled in order
+  // to pace audio packets).
+  pacer_->SetAccountForAudioPackets(true);
+
+  // Set pacing rate to 1 packet/s, no padding.
+  pacer_->SetPacingRates(DataSize::Bytes(kPacketSize) / TimeDelta::Seconds(1),
+                         DataRate::Zero());
+
+  // Add and send an audio packet.
+  SendAndExpectPacket(RtpPacketMediaType::kAudio, kSsrc, sequence_number++,
+                      clock_.TimeInMilliseconds(), kPacketSize);
+  pacer_->ProcessPackets();
+
+  // Advance time, add another audio packet and process. It should be sent
+  // immediately.
+  clock_.AdvanceTimeMilliseconds(5);
+  SendAndExpectPacket(RtpPacketMediaType::kAudio, kSsrc, sequence_number++,
+                      clock_.TimeInMilliseconds(), kPacketSize);
+  pacer_->ProcessPackets();
+}
+
+TEST_P(PacingControllerTest,
+       PaddingResumesAfterSaturationEvenWithConcurrentAudio) {
+  const uint32_t kSsrc = 12345;
+  const DataRate kPacingDataRate = DataRate::KilobitsPerSec(125);
+  const DataRate kPaddingDataRate = DataRate::KilobitsPerSec(100);
+  const TimeDelta kMaxBufferInTime = TimeDelta::Millis(500);
+  const DataSize kPacketSize = DataSize::Bytes(130);
+  const TimeDelta kAudioPacketInterval = TimeDelta::Millis(20);
+
+  // In this test, we fist send a burst of video in order to saturate the
+  // padding debt level.
+  // We then proceed to send audio at a bitrate that is slightly lower than
+  // the padding rate, meaning there will be a period with audio but no
+  // padding sent while the debt is draining, then audio and padding will
+  // be interlieved.
+
+  // Verify both with and without accounting for audio.
+  for (bool account_for_audio : {false, true}) {
+    uint16_t sequence_number = 1234;
+    MockPacketSender callback;
+    EXPECT_CALL(callback, SendRtpPacket).Times(::testing::AnyNumber());
+    pacer_ = std::make_unique<PacingController>(&clock_, &callback, nullptr,
+                                                nullptr, GetParam());
+    pacer_->SetAccountForAudioPackets(account_for_audio);
+
+    // First, saturate the padding budget.
+    pacer_->SetPacingRates(kPacingDataRate, kPaddingDataRate);
+
+    const TimeDelta kPaddingSaturationTime =
+        kMaxBufferInTime * kPaddingDataRate /
+        (kPacingDataRate - kPaddingDataRate);
+    const DataSize kVideoToSend = kPaddingSaturationTime * kPacingDataRate;
+    const DataSize kVideoPacketSize = DataSize::Bytes(1200);
+    DataSize video_sent = DataSize::Zero();
+    while (video_sent < kVideoToSend) {
+      pacer_->EnqueuePacket(
+          BuildPacket(RtpPacketMediaType::kVideo, kSsrc, sequence_number++,
+                      clock_.TimeInMilliseconds(), kVideoPacketSize.bytes()));
+      video_sent += kVideoPacketSize;
+    }
+    while (pacer_->QueueSizePackets() > 0) {
+      AdvanceTimeAndProcess();
+    }
+
+    // Add a stream of audio packets at a rate slightly lower than the padding
+    // rate, once the padding debt is paid off we expect padding to be
+    // generated.
+    pacer_->SetPacingRates(kPacingDataRate, kPaddingDataRate);
+    bool padding_seen = false;
+    EXPECT_CALL(callback, GeneratePadding).WillOnce([&](DataSize padding_size) {
+      padding_seen = true;
+      std::vector<std::unique_ptr<RtpPacketToSend>> padding_packets;
+      padding_packets.emplace_back(
+          BuildPacket(RtpPacketMediaType::kPadding, kSsrc, sequence_number++,
+                      clock_.TimeInMilliseconds(), padding_size.bytes()));
+      return padding_packets;
+    });
+
+    Timestamp start_time = clock_.CurrentTime();
+    Timestamp last_audio_time = start_time;
+    while (!padding_seen) {
+      Timestamp now = clock_.CurrentTime();
+      Timestamp next_send_time = pacer_->NextSendTime();
+      TimeDelta sleep_time =
+          std::min(next_send_time, last_audio_time + kAudioPacketInterval) -
+          now;
+      clock_.AdvanceTime(sleep_time);
+      while (clock_.CurrentTime() >= last_audio_time + kAudioPacketInterval) {
+        pacer_->EnqueuePacket(
+            BuildPacket(RtpPacketMediaType::kAudio, kSsrc, sequence_number++,
+                        clock_.TimeInMilliseconds(), kPacketSize.bytes()));
+        last_audio_time += kAudioPacketInterval;
+      }
+      pacer_->ProcessPackets();
+    }
+
+    // Verify how long it took to drain the padding debt. Allow 2% error margin.
+    const DataRate kAudioDataRate = kPacketSize / kAudioPacketInterval;
+    const TimeDelta expected_drain_time =
+        account_for_audio ? (kMaxBufferInTime * kPaddingDataRate /
+                             (kPaddingDataRate - kAudioDataRate))
+                          : kMaxBufferInTime;
+    const TimeDelta actual_drain_time = clock_.CurrentTime() - start_time;
+    EXPECT_NEAR(actual_drain_time.ms(), expected_drain_time.ms(),
+                expected_drain_time.ms() * 0.02)
+        << " where account_for_audio = "
+        << (account_for_audio ? "true" : "false");
+  }
+}
+
+TEST_P(PacingControllerTest, AccountsForAudioEnqueuTime) {
+  if (PeriodicProcess()) {
+    // This test applies only when NOT using interval budget.
+    return;
+  }
+
+  const uint32_t kSsrc = 12345;
+  const DataRate kPacingDataRate = DataRate::KilobitsPerSec(125);
+  const DataRate kPaddingDataRate = DataRate::Zero();
+  const DataSize kPacketSize = DataSize::Bytes(130);
+  const TimeDelta kPacketPacingTime = kPacketSize / kPacingDataRate;
+
+  uint32_t sequnce_number = 1;
+  // Audio not paced, but still accounted for in budget.
+  pacer_->SetAccountForAudioPackets(true);
+  pacer_->SetPacingRates(kPacingDataRate, kPaddingDataRate);
+
+  // Enqueue two audio packets, advance clock to where one packet
+  // should have drained the buffer already, has they been sent
+  // immediately.
+  SendAndExpectPacket(RtpPacketMediaType::kAudio, kSsrc, sequnce_number++,
+                      clock_.TimeInMilliseconds(), kPacketSize.bytes());
+  SendAndExpectPacket(RtpPacketMediaType::kAudio, kSsrc, sequnce_number++,
+                      clock_.TimeInMilliseconds(), kPacketSize.bytes());
+  clock_.AdvanceTime(kPacketPacingTime);
+  // Now process and make sure both packets were sent.
+  pacer_->ProcessPackets();
+  ::testing::Mock::VerifyAndClearExpectations(&callback_);
+
+  // Add a video packet. I can't be sent until debt from audio
+  // packets have been drained.
+  Send(RtpPacketMediaType::kVideo, kSsrc + 1, sequnce_number++,
+       clock_.TimeInMilliseconds(), kPacketSize.bytes());
+  EXPECT_EQ(pacer_->NextSendTime() - clock_.CurrentTime(), kPacketPacingTime);
+}
+
+TEST_P(PacingControllerTest, NextSendTimeAccountsForPadding) {
+  if (PeriodicProcess()) {
+    // This test applies only when NOT using interval budget.
+    return;
+  }
+
+  const uint32_t kSsrc = 12345;
+  const DataRate kPacingDataRate = DataRate::KilobitsPerSec(125);
+  const DataSize kPacketSize = DataSize::Bytes(130);
+  const TimeDelta kPacketPacingTime = kPacketSize / kPacingDataRate;
+
+  uint32_t sequnce_number = 1;
+
+  // Start with no padding.
+  pacer_->SetPacingRates(kPacingDataRate, DataRate::Zero());
+
+  // Send a single packet.
+  SendAndExpectPacket(RtpPacketMediaType::kVideo, kSsrc, sequnce_number++,
+                      clock_.TimeInMilliseconds(), kPacketSize.bytes());
+  pacer_->ProcessPackets();
+  ::testing::Mock::VerifyAndClearExpectations(&callback_);
+
+  // With current conditions, no need to wake until next keep-alive.
+  EXPECT_EQ(pacer_->NextSendTime() - clock_.CurrentTime(),
+            PacingController::kPausedProcessInterval);
+
+  // Enqueue a new packet, that can't be sent until previous buffer has
+  // drained.
+  SendAndExpectPacket(RtpPacketMediaType::kVideo, kSsrc, sequnce_number++,
+                      clock_.TimeInMilliseconds(), kPacketSize.bytes());
+  EXPECT_EQ(pacer_->NextSendTime() - clock_.CurrentTime(), kPacketPacingTime);
+  clock_.AdvanceTime(kPacketPacingTime);
+  pacer_->ProcessPackets();
+  ::testing::Mock::VerifyAndClearExpectations(&callback_);
+
+  // With current conditions, again no need to wake until next keep-alive.
+  EXPECT_EQ(pacer_->NextSendTime() - clock_.CurrentTime(),
+            PacingController::kPausedProcessInterval);
+
+  // Set a non-zero padding rate. Padding also can't be sent until
+  // previous debt has cleared. Since padding was disabled before, there
+  // currently is no padding debt.
+  pacer_->SetPacingRates(kPacingDataRate, kPacingDataRate / 2);
+  EXPECT_EQ(pacer_->NextSendTime() - clock_.CurrentTime(), kPacketPacingTime);
+
+  // Advance time, expect padding.
+  EXPECT_CALL(callback_, SendPadding).WillOnce(Return(kPacketSize.bytes()));
+  clock_.AdvanceTime(kPacketPacingTime);
+  pacer_->ProcessPackets();
+  ::testing::Mock::VerifyAndClearExpectations(&callback_);
+
+  // Since padding rate is half of pacing rate, next time we can send
+  // padding is double the packet pacing time.
+  EXPECT_EQ(pacer_->NextSendTime() - clock_.CurrentTime(),
+            kPacketPacingTime * 2);
+
+  // Insert a packet to be sent, this take precedence again.
+  Send(RtpPacketMediaType::kVideo, kSsrc, sequnce_number++,
+       clock_.TimeInMilliseconds(), kPacketSize.bytes());
+  EXPECT_EQ(pacer_->NextSendTime() - clock_.CurrentTime(), kPacketPacingTime);
 }
 
 INSTANTIATE_TEST_SUITE_P(

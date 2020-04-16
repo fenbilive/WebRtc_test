@@ -94,10 +94,6 @@ class TestVp8Impl : public VideoCodecUnitTest {
               encoder_->Encode(input_frame, &frame_types));
     ASSERT_TRUE(WaitForEncodedFrame(encoded_frame, codec_specific_info));
     VerifyQpParser(*encoded_frame);
-    VideoEncoder::EncoderInfo encoder_info = encoder_->GetEncoderInfo();
-    EXPECT_EQ("libvpx", encoder_info.implementation_name);
-    EXPECT_EQ(false, encoder_info.is_hardware_accelerated);
-    EXPECT_EQ(false, encoder_info.has_internal_source);
     EXPECT_EQ(kVideoCodecVP8, codec_specific_info->codecType);
     EXPECT_EQ(0, encoded_frame->SpatialIndex());
   }
@@ -556,6 +552,51 @@ TEST_F(TestVp8Impl, KeepsTimestampOnReencode) {
   encoder.Encode(NextInputFrame(), &delta_frame);
 }
 
+TEST(LibvpxVp8EncoderTest, GetEncoderInfoReturnsStaticInformation) {
+  auto* const vpx = new NiceMock<MockLibvpxVp8Interface>();
+  LibvpxVp8Encoder encoder((std::unique_ptr<LibvpxInterface>(vpx)),
+                           VP8Encoder::Settings());
+
+  const auto info = encoder.GetEncoderInfo();
+
+  EXPECT_FALSE(info.supports_native_handle);
+  EXPECT_FALSE(info.is_hardware_accelerated);
+  EXPECT_FALSE(info.has_internal_source);
+  EXPECT_TRUE(info.supports_simulcast);
+  EXPECT_EQ(info.implementation_name, "libvpx");
+}
+
+TEST(LibvpxVp8EncoderTest,
+     GetEncoderInfoReturnsEmptyResolutionBitrateLimitsByDefault) {
+  auto* const vpx = new NiceMock<MockLibvpxVp8Interface>();
+  LibvpxVp8Encoder encoder((std::unique_ptr<LibvpxInterface>(vpx)),
+                           VP8Encoder::Settings());
+
+  const auto info = encoder.GetEncoderInfo();
+
+  EXPECT_TRUE(info.resolution_bitrate_limits.empty());
+}
+
+TEST(LibvpxVp8EncoderTest,
+     GetEncoderInfoReturnsResolutionBitrateLimitsAsConfigured) {
+  std::vector<VideoEncoder::ResolutionBitrateLimits> resolution_bitrate_limits =
+      {VideoEncoder::ResolutionBitrateLimits(/*frame_size_pixels=*/640 * 360,
+                                             /*min_start_bitrate_bps=*/300,
+                                             /*min_bitrate_bps=*/100,
+                                             /*max_bitrate_bps=*/1000),
+       VideoEncoder::ResolutionBitrateLimits(320 * 180, 100, 30, 500)};
+  VP8Encoder::Settings settings;
+  settings.resolution_bitrate_limits = resolution_bitrate_limits;
+
+  auto* const vpx = new NiceMock<MockLibvpxVp8Interface>();
+  LibvpxVp8Encoder encoder((std::unique_ptr<LibvpxInterface>(vpx)),
+                           std::move(settings));
+
+  const auto info = encoder.GetEncoderInfo();
+
+  EXPECT_EQ(info.resolution_bitrate_limits, resolution_bitrate_limits);
+}
+
 TEST_F(TestVp8Impl, GetEncoderInfoFpsAllocationNoLayers) {
   FramerateFractions expected_fps_allocation[kMaxSpatialLayers] = {
       FramerateFractions(1, EncoderInfo::kMaxFramerateFraction)};
@@ -649,6 +690,28 @@ TEST_F(TestVp8Impl, GetEncoderInfoFpsAllocationSimulcastVideo) {
   expected_fps_allocation[0].push_back(EncoderInfo::kMaxFramerateFraction);
   expected_fps_allocation[1] = expected_fps_allocation[0];
   expected_fps_allocation[2] = expected_fps_allocation[0];
+  EXPECT_THAT(encoder_->GetEncoderInfo().fps_allocation,
+              ::testing::ElementsAreArray(expected_fps_allocation));
+
+  // Release encoder and re-init without temporal layers.
+  EXPECT_EQ(WEBRTC_VIDEO_CODEC_OK, encoder_->Release());
+
+  // Sanity check fps allocation when not inited.
+  FramerateFractions default_fps_fraction[kMaxSpatialLayers];
+  default_fps_fraction[0].push_back(EncoderInfo::kMaxFramerateFraction);
+  EXPECT_THAT(encoder_->GetEncoderInfo().fps_allocation,
+              ::testing::ElementsAreArray(default_fps_fraction));
+
+  for (int i = 0; i < codec_settings_.numberOfSimulcastStreams; ++i) {
+    codec_settings_.simulcastStream[i].numberOfTemporalLayers = 1;
+  }
+  EXPECT_EQ(WEBRTC_VIDEO_CODEC_OK,
+            encoder_->InitEncode(&codec_settings_, kSettings));
+
+  for (size_t i = 0; i < 3; ++i) {
+    expected_fps_allocation[i].clear();
+    expected_fps_allocation[i].push_back(EncoderInfo::kMaxFramerateFraction);
+  }
   EXPECT_THAT(encoder_->GetEncoderInfo().fps_allocation,
               ::testing::ElementsAreArray(expected_fps_allocation));
 }

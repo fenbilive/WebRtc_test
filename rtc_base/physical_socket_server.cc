@@ -198,12 +198,10 @@ int PhysicalSocket::Bind(const SocketAddress& bind_addr) {
       if (bind_addr.IsLoopbackIP()) {
         // If we couldn't bind to a loopback IP (which should only happen in
         // test scenarios), continue on. This may be expected behavior.
-        RTC_LOG(LS_VERBOSE) << "Binding socket to loopback address "
-                            << bind_addr.ipaddr().ToString()
+        RTC_LOG(LS_VERBOSE) << "Binding socket to loopback address"
                             << " failed; result: " << static_cast<int>(result);
       } else {
-        RTC_LOG(LS_WARNING) << "Binding socket to network address "
-                            << bind_addr.ipaddr().ToString()
+        RTC_LOG(LS_WARNING) << "Binding socket to network address"
                             << " failed; result: " << static_cast<int>(result);
         // If a network binding was attempted and failed, we should stop here
         // and not try to use the socket. Otherwise, we may end up sending
@@ -896,6 +894,14 @@ int SocketDispatcher::Close() {
   id_ = 0;
   signal_close_ = false;
 #endif
+#if defined(WEBRTC_USE_EPOLL)
+  // If we're batching events, the socket can be closed and reopened
+  // during the batch. Set saved_enabled_events_ to 0 here so the new
+  // socket, if any, has the correct old events bitfield
+  if (saved_enabled_events_ != -1) {
+    saved_enabled_events_ = 0;
+  }
+#endif
   ss_->Remove(this);
   return PhysicalSocket::Close();
 }
@@ -963,7 +969,7 @@ class PosixSignalHandler {
   // POSIX only specifies 32 signals, but in principle the system might have
   // more and the programmer might choose to use them, so we size our array
   // for 128.
-  static const int kNumPosixSignals = 128;
+  static constexpr int kNumPosixSignals = 128;
 
   // There is just a single global instance. (Signal handlers do not get any
   // sort of user-defined void * parameter, so they can't access anything that

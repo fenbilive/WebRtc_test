@@ -46,11 +46,16 @@ class RouteEndpoint {
                          /* adapter_id = */ 0, network_id,
                          /* uses_turn = */ false);
   }
+  RouteEndpoint CreateWithTurn(bool uses_turn) const {
+    return RouteEndpoint(adapter_type_, adapter_id_, network_id_, uses_turn);
+  }
 
   AdapterType adapter_type() const { return adapter_type_; }
   uint16_t adapter_id() const { return adapter_id_; }
   uint16_t network_id() const { return network_id_; }
   bool uses_turn() const { return uses_turn_; }
+
+  bool operator==(const RouteEndpoint& other) const;
 
  private:
   AdapterType adapter_type_ = ADAPTER_TYPE_UNKNOWN;
@@ -69,12 +74,6 @@ struct NetworkRoute {
   // This is the maximum of any part of the route.
   int packet_overhead = 0;
 
-  // Downstream projects depend on the old representation,
-  // populate that until they have been migrated.
-  // TODO(jonaso): remove.
-  uint16_t local_network_id = 0;
-  uint16_t remote_network_id = 0;
-
   RTC_NO_INLINE inline std::string DebugString() const {
     rtc::StringBuilder oss;
     oss << "[ connected: " << connected << " local: [ " << local.adapter_id()
@@ -87,6 +86,8 @@ struct NetworkRoute {
         << " ] packet_overhead_bytes: " << packet_overhead << " ]";
     return oss.Release();
   }
+
+  bool operator==(const NetworkRoute& other) const;
 };
 
 }  // namespace rtc

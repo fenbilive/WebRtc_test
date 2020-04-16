@@ -1155,6 +1155,7 @@ bool PeerConnection::Initialize(
   observer_ = dependencies.observer;
   async_resolver_factory_ = std::move(dependencies.async_resolver_factory);
   port_allocator_ = std::move(dependencies.allocator);
+  packet_socket_factory_ = std::move(dependencies.packet_socket_factory);
   ice_transport_factory_ = std::move(dependencies.ice_transport_factory);
   tls_cert_verifier_ = std::move(dependencies.tls_cert_verifier);
 
@@ -5819,8 +5820,9 @@ PeerConnection::InitializePortAllocator_n(
   // by experiment.
   if (configuration.disable_ipv6) {
     port_allocator_flags &= ~(cricket::PORTALLOCATOR_ENABLE_IPV6);
-  } else if (webrtc::field_trial::FindFullName("WebRTC-IPv6Default")
-                 .find("Disabled") == 0) {
+  } else if (absl::StartsWith(
+                 webrtc::field_trial::FindFullName("WebRTC-IPv6Default"),
+                 "Disabled")) {
     port_allocator_flags &= ~(cricket::PORTALLOCATOR_ENABLE_IPV6);
   }
 

@@ -66,8 +66,16 @@ rtc::AdapterType GuessAdapterTypeFromNetworkCost(int network_cost) {
       return rtc::ADAPTER_TYPE_ETHERNET;
     case rtc::kNetworkCostLow:
       return rtc::ADAPTER_TYPE_WIFI;
-    case rtc::kNetworkCostHigh:
+    case rtc::kNetworkCostCellular:
       return rtc::ADAPTER_TYPE_CELLULAR;
+    case rtc::kNetworkCostCellular2G:
+      return rtc::ADAPTER_TYPE_CELLULAR_2G;
+    case rtc::kNetworkCostCellular3G:
+      return rtc::ADAPTER_TYPE_CELLULAR_3G;
+    case rtc::kNetworkCostCellular4G:
+      return rtc::ADAPTER_TYPE_CELLULAR_4G;
+    case rtc::kNetworkCostCellular5G:
+      return rtc::ADAPTER_TYPE_CELLULAR_5G;
     case rtc::kNetworkCostUnknown:
       return rtc::ADAPTER_TYPE_UNKNOWN;
     case rtc::kNetworkCostMax:
@@ -1008,6 +1016,9 @@ void P2PTransportChannel::OnUnknownAddress(PortInterface* port,
         component(), ProtoToString(proto), address, remote_candidate_priority,
         remote_username, remote_password, PRFLX_PORT_TYPE, remote_generation,
         "", network_id, network_cost);
+    if (proto == PROTO_TCP) {
+      remote_candidate.set_tcptype(TCPTYPE_ACTIVE_STR);
+    }
 
     // From RFC 5245, section-7.2.1.3:
     // The foundation of the candidate is set to an arbitrary value, different
@@ -1733,12 +1744,6 @@ void P2PTransportChannel::SwitchSelectedConnection(Connection* conn,
         /* uses_turn= */ selected_connection_->remote_candidate().type() ==
             RELAY_PORT_TYPE);
 
-    // Downstream projects depend on the old representation,
-    // populate that until they have been migrated.
-    // TODO(jonaso): remove.
-    network_route_->local_network_id = network_route_->local.network_id();
-    network_route_->remote_network_id = network_route_->remote.network_id();
-
     network_route_->last_sent_packet_id = last_sent_packet_id_;
     network_route_->packet_overhead =
         selected_connection_->local_candidate().address().ipaddr().overhead() +
@@ -1894,8 +1899,9 @@ void P2PTransportChannel::CheckAndPing() {
   UpdateConnectionStates();
 
   auto result = ice_controller_->SelectConnectionToPing(last_ping_sent_ms_);
-  Connection* conn = result.first;
-  int delay = result.second;
+  Connection* conn =
+      const_cast<Connection*>(result.connection.value_or(nullptr));
+  int delay = result.recheck_delay_ms;
 
   if (conn) {
     PingConnection(conn);

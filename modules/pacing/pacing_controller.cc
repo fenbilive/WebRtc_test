@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/strings/match.h"
 #include "modules/pacing/bitrate_prober.h"
 #include "modules/pacing/interval_budget.h"
 #include "modules/utility/include/process_thread.h"
@@ -42,12 +43,12 @@ constexpr int kFirstPriority = 0;
 
 bool IsDisabled(const WebRtcKeyValueConfig& field_trials,
                 absl::string_view key) {
-  return field_trials.Lookup(key).find("Disabled") == 0;
+  return absl::StartsWith(field_trials.Lookup(key), "Disabled");
 }
 
 bool IsEnabled(const WebRtcKeyValueConfig& field_trials,
                absl::string_view key) {
-  return field_trials.Lookup(key).find("Enabled") == 0;
+  return absl::StartsWith(field_trials.Lookup(key), "Enabled");
 }
 
 int GetPriorityForType(RtpPacketMediaType type) {
@@ -284,8 +285,9 @@ void PacingController::EnqueuePacketInternal(
   }
 
   if (mode_ == ProcessMode::kDynamic && packet_queue_.Empty() &&
-      media_debt_ == DataSize::Zero()) {
-    last_process_time_ = CurrentTime();
+      NextSendTime() <= now) {
+    TimeDelta elapsed_time = UpdateTimeAndGetElapsed(now);
+    UpdateBudgetWithElapsedTime(elapsed_time);
   }
   packet_queue_.Push(priority, now, packet_counter_++, std::move(packet));
 }
@@ -327,7 +329,7 @@ Timestamp PacingController::NextSendTime() const {
   }
 
   // If probing is active, that always takes priority.
-  if (prober_.IsProbing()) {
+  if (prober_.is_probing()) {
     Timestamp probe_time = prober_.NextProbeTime(now);
     // |probe_time| == PlusInfinity indicates no probe scheduled.
     if (probe_time != Timestamp::PlusInfinity() && !probing_send_failure_) {
@@ -343,31 +345,35 @@ Timestamp PacingController::NextSendTime() const {
   // In dynamic mode, figure out when the next packet should be sent,
   // given the current conditions.
 
-  if (Congested() || packet_counter_ == 0) {
-    // If congested, we only send keep-alive or audio (if audio is
-    // configured in pass-through mode).
-    if (!pace_audio_ && packet_queue_.NextPacketIsAudio()) {
-      return now;
+  if (!pace_audio_) {
+    // Not pacing audio, if leading packet is audio its target send
+    // time is the time at which it was enqueued.
+    absl::optional<Timestamp> audio_enqueue_time =
+        packet_queue_.LeadingAudioPacketEnqueueTime();
+    if (audio_enqueue_time.has_value()) {
+      return *audio_enqueue_time;
     }
+  }
 
+  if (Congested() || packet_counter_ == 0) {
     // We need to at least send keep-alive packets with some interval.
     return last_send_time_ + kCongestedPacketInterval;
   }
 
-  // Check how long until media buffer has drained. We schedule a call
-  // for when the last packet in the queue drains as otherwise we may
-  // be late in starting padding.
-  if (media_rate_ > DataRate::Zero() &&
-      (!packet_queue_.Empty() || !media_debt_.IsZero())) {
+  // Check how long until we can send the next media packet.
+  if (media_rate_ > DataRate::Zero() && !packet_queue_.Empty()) {
     return std::min(last_send_time_ + kPausedProcessInterval,
                     last_process_time_ + media_debt_ / media_rate_);
   }
 
   // If we _don't_ have pending packets, check how long until we have
-  // bandwidth for padding packets.
+  // bandwidth for padding packets. Both media and padding debts must
+  // have been drained to do this.
   if (padding_rate_ > DataRate::Zero() && packet_queue_.Empty()) {
+    TimeDelta drain_time =
+        std::max(media_debt_ / media_rate_, padding_debt_ / padding_rate_);
     return std::min(last_send_time_ + kPausedProcessInterval,
-                    last_process_time_ + padding_debt_ / padding_rate_);
+                    last_process_time_ + drain_time);
   }
 
   if (send_padding_if_silent_) {
@@ -462,7 +468,7 @@ void PacingController::ProcessPackets() {
   }
 
   bool first_packet_in_probe = false;
-  bool is_probing = prober_.IsProbing();
+  bool is_probing = prober_.is_probing();
   PacedPacketInfo pacing_info;
   absl::optional<DataSize> recommended_probe_size;
   if (is_probing) {
@@ -559,6 +565,8 @@ void PacingController::ProcessPackets() {
     }
   }
 
+  last_process_time_ = std::max(last_process_time_, previous_process_time);
+
   if (is_probing) {
     probing_send_failure_ = data_sent == DataSize::Zero();
     if (!probing_send_failure_) {
@@ -613,7 +621,8 @@ std::unique_ptr<RtpPacketToSend> PacingController::GetPendingPacket(
   // First, check if there is any reason _not_ to send the next queued packet.
 
   // Unpaced audio packets and probes are exempted from send checks.
-  bool unpaced_audio_packet = !pace_audio_ && packet_queue_.NextPacketIsAudio();
+  bool unpaced_audio_packet =
+      !pace_audio_ && packet_queue_.LeadingAudioPacketEnqueueTime().has_value();
   bool is_probe = pacing_info.probe_cluster_id != PacedPacketInfo::kNotAProbe;
   if (!unpaced_audio_packet && !is_probe) {
     if (Congested()) {

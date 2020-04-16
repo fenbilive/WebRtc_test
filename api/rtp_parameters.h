@@ -93,6 +93,7 @@ enum class DegradationPreference {
 
 RTC_EXPORT extern const double kDefaultBitratePriority;
 
+// GENERATED_JAVA_ENUM_PACKAGE: org.webrtc
 enum class Priority {
   kVeryLow,
   kLow,
@@ -231,9 +232,9 @@ struct RTC_EXPORT RtpHeaderExtensionCapability {
 
   // Constructors for convenience.
   RtpHeaderExtensionCapability();
-  explicit RtpHeaderExtensionCapability(std::string uri);
-  RtpHeaderExtensionCapability(std::string uri, int preferred_id);
-  RtpHeaderExtensionCapability(std::string uri,
+  explicit RtpHeaderExtensionCapability(absl::string_view uri);
+  RtpHeaderExtensionCapability(absl::string_view uri, int preferred_id);
+  RtpHeaderExtensionCapability(absl::string_view uri,
                                int preferred_id,
                                RtpTransceiverDirection direction);
   ~RtpHeaderExtensionCapability();
@@ -250,9 +251,10 @@ struct RTC_EXPORT RtpHeaderExtensionCapability {
 // RTP header extension, see RFC8285.
 struct RTC_EXPORT RtpExtension {
   RtpExtension();
-  RtpExtension(std::string uri, int id);
-  RtpExtension(std::string uri, int id, bool encrypt);
+  RtpExtension(absl::string_view uri, int id);
+  RtpExtension(absl::string_view uri, int id, bool encrypt);
   ~RtpExtension();
+
   std::string ToString() const;
   bool operator==(const RtpExtension& rhs) const {
     return uri == rhs.uri && id == rhs.id && encrypt == rhs.encrypt;
@@ -274,66 +276,89 @@ struct RTC_EXPORT RtpExtension {
   static std::vector<RtpExtension> FilterDuplicateNonEncrypted(
       const std::vector<RtpExtension>& extensions);
 
+  // Encryption of Header Extensions, see RFC 6904 for details:
+  // https://tools.ietf.org/html/rfc6904
+  static constexpr char kEncryptHeaderExtensionsUri[] =
+      "urn:ietf:params:rtp-hdrext:encrypt";
+
   // Header extension for audio levels, as defined in:
-  // http://tools.ietf.org/html/draft-ietf-avtext-client-to-mixer-audio-level-03
-  static const char kAudioLevelUri[];
+  // https://tools.ietf.org/html/rfc6464
+  static constexpr char kAudioLevelUri[] =
+      "urn:ietf:params:rtp-hdrext:ssrc-audio-level";
 
   // Header extension for RTP timestamp offset, see RFC 5450 for details:
   // http://tools.ietf.org/html/rfc5450
-  static const char kTimestampOffsetUri[];
+  static constexpr char kTimestampOffsetUri[] =
+      "urn:ietf:params:rtp-hdrext:toffset";
 
   // Header extension for absolute send time, see url for details:
   // http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time
-  static const char kAbsSendTimeUri[];
+  static constexpr char kAbsSendTimeUri[] =
+      "http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time";
 
   // Header extension for absolute capture time, see url for details:
   // http://www.webrtc.org/experiments/rtp-hdrext/abs-capture-time
-  static const char kAbsoluteCaptureTimeUri[];
+  static constexpr char kAbsoluteCaptureTimeUri[] =
+      "http://www.webrtc.org/experiments/rtp-hdrext/abs-capture-time";
 
   // Header extension for coordination of video orientation, see url for
   // details:
   // http://www.etsi.org/deliver/etsi_ts/126100_126199/126114/12.07.00_60/ts_126114v120700p.pdf
-  static const char kVideoRotationUri[];
+  static constexpr char kVideoRotationUri[] = "urn:3gpp:video-orientation";
 
   // Header extension for video content type. E.g. default or screenshare.
-  static const char kVideoContentTypeUri[];
+  static constexpr char kVideoContentTypeUri[] =
+      "http://www.webrtc.org/experiments/rtp-hdrext/video-content-type";
 
   // Header extension for video timing.
-  static const char kVideoTimingUri[];
+  static constexpr char kVideoTimingUri[] =
+      "http://www.webrtc.org/experiments/rtp-hdrext/video-timing";
 
   // Header extension for video frame marking.
-  static const char kFrameMarkingUri[];
+  static constexpr char kFrameMarkingUri[] =
+      "http://tools.ietf.org/html/draft-ietf-avtext-framemarking-07";
 
   // Experimental codec agnostic frame descriptor.
-  static const char kGenericFrameDescriptorUri00[];
-  static const char kGenericFrameDescriptorUri01[];
-  static const char kDependencyDescriptorUri[];
-  // TODO(bugs.webrtc.org/10243): Remove once dependencies have been updated.
-  static const char kGenericFrameDescriptorUri[];
+  static constexpr char kGenericFrameDescriptorUri00[] =
+      "http://www.webrtc.org/experiments/rtp-hdrext/"
+      "generic-frame-descriptor-00";
+  static constexpr char kGenericFrameDescriptorUri01[] =
+      "http://www.webrtc.org/experiments/rtp-hdrext/"
+      "generic-frame-descriptor-01";
+  static constexpr char kDependencyDescriptorUri[] =
+      "https://aomediacodec.github.io/av1-rtp-spec/"
+      "#dependency-descriptor-rtp-header-extension";
 
   // Header extension for transport sequence number, see url for details:
   // http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions
-  static const char kTransportSequenceNumberUri[];
-  static const char kTransportSequenceNumberV2Uri[];
+  static constexpr char kTransportSequenceNumberUri[] =
+      "http://www.ietf.org/id/"
+      "draft-holmer-rmcat-transport-wide-cc-extensions-01";
+  static constexpr char kTransportSequenceNumberV2Uri[] =
+      "http://www.webrtc.org/experiments/rtp-hdrext/transport-wide-cc-02";
 
-  static const char kPlayoutDelayUri[];
+  // This extension allows applications to adaptively limit the playout delay
+  // on frames as per the current needs. For example, a gaming application
+  // has very different needs on end-to-end delay compared to a video-conference
+  // application.
+  static constexpr char kPlayoutDelayUri[] =
+      "http://www.webrtc.org/experiments/rtp-hdrext/playout-delay";
+
+  // Header extension for color space information.
+  static constexpr char kColorSpaceUri[] =
+      "http://www.webrtc.org/experiments/rtp-hdrext/color-space";
 
   // Header extension for identifying media section within a transport.
   // https://tools.ietf.org/html/draft-ietf-mmusic-sdp-bundle-negotiation-49#section-15
-  static const char kMidUri[];
-
-  // Encryption of Header Extensions, see RFC 6904 for details:
-  // https://tools.ietf.org/html/rfc6904
-  static const char kEncryptHeaderExtensionsUri[];
-
-  // Header extension for color space information.
-  static const char kColorSpaceUri[];
+  static constexpr char kMidUri[] = "urn:ietf:params:rtp-hdrext:sdes:mid";
 
   // Header extension for RIDs and Repaired RIDs
   // https://tools.ietf.org/html/draft-ietf-avtext-rid-09
   // https://tools.ietf.org/html/draft-ietf-mmusic-rid-15
-  static const char kRidUri[];
-  static const char kRepairedRidUri[];
+  static constexpr char kRidUri[] =
+      "urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id";
+  static constexpr char kRepairedRidUri[] =
+      "urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id";
 
   // Inclusive min and max IDs for two-byte header extensions and one-byte
   // header extensions, per RFC8285 Section 4.2-4.3.
@@ -399,6 +424,11 @@ struct RTC_EXPORT RtpEncodingParameters {
   // The relative bitrate priority of this encoding. Currently this is
   // implemented for the entire rtp sender by using the value of the first
   // encoding parameter.
+  // See: https://w3c.github.io/webrtc-priority/#enumdef-rtcprioritytype
+  // "very-low" = 0.5
+  // "low" = 1.0
+  // "medium" = 2.0
+  // "high" = 4.0
   // TODO(webrtc.bugs.org/8630): Implement this per encoding parameter.
   // Currently there is logic for how bitrate is distributed per simulcast layer
   // in the VideoBitrateAllocator. This must be updated to incorporate relative
@@ -407,9 +437,7 @@ struct RTC_EXPORT RtpEncodingParameters {
 
   // The relative DiffServ Code Point priority for this encoding, allowing
   // packets to be marked relatively higher or lower without affecting
-  // bandwidth allocations. See https://w3c.github.io/webrtc-dscp-exp/ . NB
-  // we follow chromium's translation of the allowed string enum values for
-  // this field to 1.0, 0.5, et cetera, similar to bitrate_priority above.
+  // bandwidth allocations. See https://w3c.github.io/webrtc-dscp-exp/ .
   // TODO(http://crbug.com/webrtc/8630): Implement this per encoding parameter.
   // TODO(http://crbug.com/webrtc/11379): TCP connections should use a single
   // DSCP value even if shared by multiple senders; this is not implemented.

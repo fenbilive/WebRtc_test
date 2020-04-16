@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/strings/match.h"
 #include "api/fec_controller.h"
 #include "api/media_stream_proxy.h"
 #include "api/media_stream_track_proxy.h"
@@ -167,7 +168,7 @@ RtpCapabilities PeerConnectionFactory::GetRtpSenderCapabilities(
     }
     case cricket::MEDIA_TYPE_VIDEO: {
       cricket::VideoCodecs cricket_codecs;
-      channel_manager_->GetSupportedVideoCodecs(&cricket_codecs);
+      channel_manager_->GetSupportedVideoSendCodecs(&cricket_codecs);
       return ToRtpCapabilities(
           cricket_codecs,
           channel_manager_->GetDefaultEnabledVideoRtpHeaderExtensions());
@@ -192,7 +193,7 @@ RtpCapabilities PeerConnectionFactory::GetRtpReceiverCapabilities(
     }
     case cricket::MEDIA_TYPE_VIDEO: {
       cricket::VideoCodecs cricket_codecs;
-      channel_manager_->GetSupportedVideoCodecs(&cricket_codecs);
+      channel_manager_->GetSupportedVideoReceiveCodecs(&cricket_codecs);
       return ToRtpCapabilities(
           cricket_codecs,
           channel_manager_->GetDefaultEnabledVideoRtpHeaderExtensions());
@@ -397,7 +398,7 @@ std::unique_ptr<Call> PeerConnectionFactory::CreateCall_w(
 
 bool PeerConnectionFactory::IsTrialEnabled(absl::string_view key) const {
   RTC_DCHECK(trials_);
-  return trials_->Lookup(key).find("Enabled") == 0;
+  return absl::StartsWith(trials_->Lookup(key), "Enabled");
 }
 
 }  // namespace webrtc

@@ -390,6 +390,8 @@ rtc_library("stringutils") {
     "string_utils.h",
     "strings/string_builder.cc",
     "strings/string_builder.h",
+    "strings/string_format.cc",
+    "strings/string_format.h",
   ]
   deps = [
     ":checks",
@@ -824,6 +826,7 @@ rtc_library("rtc_base") {
     "network_constants.h",
     "network_monitor.cc",
     "network_monitor.h",
+    "network_route.cc",
     "network_route.h",
     "null_socket_server.cc",
     "null_socket_server.h",
@@ -1170,6 +1173,7 @@ if (rtc_include_tests) {
       "string_utils_unittest.cc",
       "stringize_macros_unittest.cc",
       "strings/string_builder_unittest.cc",
+      "strings/string_format_unittest.cc",
       "swap_queue_unittest.cc",
       "thread_annotations_unittest.cc",
       "thread_checker_unittest.cc",
@@ -1306,6 +1310,7 @@ if (rtc_include_tests) {
       "memory_usage_unittest.cc",
       "message_digest_unittest.cc",
       "nat_unittest.cc",
+      "network_route_unittest.cc",
       "network_unittest.cc",
       "proxy_unittest.cc",
       "rolling_accumulator_unittest.cc",

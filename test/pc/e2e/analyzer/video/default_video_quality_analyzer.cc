@@ -26,6 +26,7 @@ namespace {
 constexpr int kMaxActiveComparisons = 10;
 constexpr int kFreezeThresholdMs = 150;
 constexpr int kMicrosPerSecond = 1000000;
+constexpr int kBitsInByte = 8;
 
 void LogFrameCounters(const std::string& name, const FrameCounters& counters) {
   RTC_LOG(INFO) << "[" << name << "] Captured    : " << counters.captured;
@@ -180,7 +181,8 @@ void DefaultVideoQualityAnalyzer::OnFramePreEncode(
 
 void DefaultVideoQualityAnalyzer::OnFrameEncoded(
     uint16_t frame_id,
-    const webrtc::EncodedImage& encoded_image) {
+    const webrtc::EncodedImage& encoded_image,
+    const EncoderStats& stats) {
   rtc::CritScope crit(&lock_);
   auto it = frame_stats_.find(frame_id);
   RTC_DCHECK(it != frame_stats_.end());
@@ -192,6 +194,8 @@ void DefaultVideoQualityAnalyzer::OnFrameEncoded(
     stream_frame_counters_[it->second.stream_label].encoded++;
   }
   it->second.encoded_time = Now();
+  it->second.encoded_image_size = encoded_image.size();
+  it->second.target_encode_bitrate = stats.target_encode_bitrate;
 }
 
 void DefaultVideoQualityAnalyzer::OnFrameDropped(
@@ -225,8 +229,7 @@ void DefaultVideoQualityAnalyzer::OnFramePreDecode(
 
 void DefaultVideoQualityAnalyzer::OnFrameDecoded(
     const webrtc::VideoFrame& frame,
-    absl::optional<int32_t> decode_time_ms,
-    absl::optional<uint8_t> qp) {
+    const DecoderStats& stats) {
   rtc::CritScope crit(&lock_);
   auto it = frame_stats_.find(frame.id());
   RTC_DCHECK(it != frame_stats_.end());
@@ -515,6 +518,8 @@ void DefaultVideoQualityAnalyzer::ProcessComparison(
     stats->encode_time_ms.AddSample(
         (frame_stats.encoded_time - frame_stats.pre_encode_time).ms());
     stats->encode_frame_rate.AddEvent(frame_stats.encoded_time);
+    stats->total_encoded_images_payload += frame_stats.encoded_image_size;
+    stats->target_encode_bitrate.AddSample(frame_stats.target_encode_bitrate);
   } else {
     if (frame_stats.pre_encode_time.IsFinite()) {
       stats->dropped_by_encoder++;
@@ -590,22 +595,33 @@ void DefaultVideoQualityAnalyzer::ReportResults(
     const StreamStats& stats,
     const FrameCounters& frame_counters) {
   using ::webrtc::test::ImproveDirection;
+  TimeDelta test_duration = Now() - start_time_;
 
   double sum_squared_interframe_delays_secs = 0;
-  for (const double interframe_delay_ms :
-       stats.time_between_rendered_frames_ms.GetSamples()) {
+  Timestamp video_start_time = Timestamp::PlusInfinity();
+  Timestamp video_end_time = Timestamp::MinusInfinity();
+  for (const SamplesStatsCounter::StatsSample& sample :
+       stats.time_between_rendered_frames_ms.GetTimedSamples()) {
+    double interframe_delay_ms = sample.value;
     const double interframe_delays_secs = interframe_delay_ms / 1000.0;
     // Sum of squared inter frame intervals is used to calculate the harmonic
     // frame rate metric. The metric aims to reflect overall experience related
     // to smoothness of video playback and includes both freezes and pauses.
     sum_squared_interframe_delays_secs +=
         interframe_delays_secs * interframe_delays_secs;
+    if (sample.time < video_start_time) {
+      video_start_time = sample.time;
+    }
+    if (sample.time > video_end_time) {
+      video_end_time = sample.time;
+    }
   }
   double harmonic_framerate_fps = 0;
-  if (sum_squared_interframe_delays_secs > 0.0) {
-    TimeDelta video_duration = Now() - start_time_;
-    harmonic_framerate_fps =
-        video_duration.seconds() / sum_squared_interframe_delays_secs;
+  TimeDelta video_duration = video_end_time - video_start_time;
+  if (sum_squared_interframe_delays_secs > 0.0 && video_duration.IsFinite()) {
+    harmonic_framerate_fps = static_cast<double>(video_duration.us()) /
+                             static_cast<double>(kMicrosPerSecond) /
+                             sum_squared_interframe_delays_secs;
   }
 
   ReportResult("psnr", test_case_name, stats.psnr, "dB",
@@ -657,6 +673,14 @@ void DefaultVideoQualityAnalyzer::ReportResults(
                     /*important=*/false, ImproveDirection::kSmallerIsBetter);
   ReportResult("max_skipped", test_case_name, stats.skipped_between_rendered,
                "count", ImproveDirection::kSmallerIsBetter);
+  ReportResult("target_encode_bitrate", test_case_name,
+               stats.target_encode_bitrate / kBitsInByte, "bytesPerSecond",
+               ImproveDirection::kNone);
+  test::PrintResult(
+      "actual_encode_bitrate", "", test_case_name,
+      static_cast<double>(stats.total_encoded_images_payload) /
+          static_cast<double>(test_duration.us()) * kMicrosPerSecond,
+      "bytesPerSecond", /*important=*/false, ImproveDirection::kNone);
 }
 
 void DefaultVideoQualityAnalyzer::ReportResult(

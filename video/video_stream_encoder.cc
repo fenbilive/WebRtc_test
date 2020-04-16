@@ -516,18 +516,6 @@ void VideoStreamEncoder::ReconfigureEncoder() {
     RTC_LOG(LS_ERROR) << "Failed to create encoder configuration.";
   }
 
-  // Set min_bitrate_bps, max_bitrate_bps, and max padding bit rate for VP9.
-  if (encoder_config_.codec_type == kVideoCodecVP9) {
-    // Lower max bitrate to the level codec actually can produce.
-    streams[0].max_bitrate_bps =
-        std::min(streams[0].max_bitrate_bps,
-                 SvcRateAllocator::GetMaxBitrate(codec).bps<int>());
-    streams[0].min_bitrate_bps = codec.spatialLayers[0].minBitrate * 1000;
-    // target_bitrate_bps specifies the maximum padding bitrate.
-    streams[0].target_bitrate_bps =
-        SvcRateAllocator::GetPaddingBitrate(codec).bps<int>();
-  }
-
   char log_stream_buf[4 * 1024];
   rtc::SimpleStringBuilder log_stream(log_stream_buf);
   log_stream << "ReconfigureEncoder:\n";
@@ -536,9 +524,9 @@ void VideoStreamEncoder::ReconfigureEncoder() {
     log_stream << i << ": " << codec.simulcastStream[i].width << "x"
                << codec.simulcastStream[i].height
                << " fps: " << codec.simulcastStream[i].maxFramerate
-               << " min_bps: " << codec.simulcastStream[i].minBitrate
-               << " target_bps: " << codec.simulcastStream[i].targetBitrate
-               << " max_bps: " << codec.simulcastStream[i].maxBitrate
+               << " min_kbps: " << codec.simulcastStream[i].minBitrate
+               << " target_kbps: " << codec.simulcastStream[i].targetBitrate
+               << " max_kbps: " << codec.simulcastStream[i].maxBitrate
                << " max_fps: " << codec.simulcastStream[i].maxFramerate
                << " max_qp: " << codec.simulcastStream[i].qpMax
                << " num_tl: " << codec.simulcastStream[i].numberOfTemporalLayers
@@ -552,9 +540,9 @@ void VideoStreamEncoder::ReconfigureEncoder() {
       log_stream << i << ": " << codec.spatialLayers[i].width << "x"
                  << codec.spatialLayers[i].height
                  << " fps: " << codec.spatialLayers[i].maxFramerate
-                 << " min_bps: " << codec.spatialLayers[i].minBitrate
-                 << " target_bps: " << codec.spatialLayers[i].targetBitrate
-                 << " max_bps: " << codec.spatialLayers[i].maxBitrate
+                 << " min_kbps: " << codec.spatialLayers[i].minBitrate
+                 << " target_kbps: " << codec.spatialLayers[i].targetBitrate
+                 << " max_kbps: " << codec.spatialLayers[i].maxBitrate
                  << " max_qp: " << codec.spatialLayers[i].qpMax
                  << " num_tl: " << codec.spatialLayers[i].numberOfTemporalLayers
                  << " active: "
@@ -717,8 +705,26 @@ void VideoStreamEncoder::ReconfigureEncoder() {
 
   pending_encoder_reconfiguration_ = false;
 
+  bool is_svc = false;
+  // Set min_bitrate_bps, max_bitrate_bps, and max padding bit rate for VP9
+  // and leave only one stream containing all necessary information.
+  if (encoder_config_.codec_type == kVideoCodecVP9) {
+    // Lower max bitrate to the level codec actually can produce.
+    streams[0].max_bitrate_bps =
+        std::min(streams[0].max_bitrate_bps,
+                 SvcRateAllocator::GetMaxBitrate(codec).bps<int>());
+    streams[0].min_bitrate_bps = codec.spatialLayers[0].minBitrate * 1000;
+    // target_bitrate_bps specifies the maximum padding bitrate.
+    streams[0].target_bitrate_bps =
+        SvcRateAllocator::GetPaddingBitrate(codec).bps<int>();
+    streams[0].width = streams.back().width;
+    streams[0].height = streams.back().height;
+    is_svc = codec.VP9()->numberOfSpatialLayers > 1;
+    streams.resize(1);
+  }
+
   sink_->OnEncoderConfigurationChanged(
-      std::move(streams), encoder_config_.content_type,
+      std::move(streams), is_svc, encoder_config_.content_type,
       encoder_config_.min_transmit_bitrate_bps);
 
   resource_adaptation_processor_->ConfigureQualityScaler(info);

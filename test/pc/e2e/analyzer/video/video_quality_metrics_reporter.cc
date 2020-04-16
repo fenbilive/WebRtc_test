@@ -42,17 +42,9 @@ void VideoQualityMetricsReporter::OnStatsReports(
     const webrtc::StatsReport::Value* transmission_bitrate =
         stats_report->FindValue(
             StatsReport::StatsValueName::kStatsValueNameTransmitBitrate);
-    const webrtc::StatsReport::Value* actual_encode_bitrate =
-        stats_report->FindValue(
-            StatsReport::StatsValueName::kStatsValueNameActualEncBitrate);
-    const webrtc::StatsReport::Value* target_encode_bitrate =
-        stats_report->FindValue(
-            StatsReport::StatsValueName::kStatsValueNameTargetEncBitrate);
     RTC_CHECK(available_send_bandwidth);
     RTC_CHECK(retransmission_bitrate);
     RTC_CHECK(transmission_bitrate);
-    RTC_CHECK(actual_encode_bitrate);
-    RTC_CHECK(target_encode_bitrate);
 
     rtc::CritScope crit(&video_bwe_stats_lock_);
     VideoBweStats& video_bwe_stats = video_bwe_stats_[pc_label];
@@ -62,10 +54,6 @@ void VideoQualityMetricsReporter::OnStatsReports(
         transmission_bitrate->int_val());
     video_bwe_stats.retransmission_bitrate.AddSample(
         retransmission_bitrate->int_val());
-    video_bwe_stats.actual_encode_bitrate.AddSample(
-        actual_encode_bitrate->int_val());
-    video_bwe_stats.target_encode_bitrate.AddSample(
-        target_encode_bitrate->int_val());
   }
 }
 
@@ -92,12 +80,6 @@ void VideoQualityMetricsReporter::ReportVideoBweResults(
                "bytesPerSecond");
   ReportResult("retransmission_bitrate", test_case_name,
                video_bwe_stats.retransmission_bitrate / kBitsInByte,
-               "bytesPerSecond");
-  ReportResult("actual_encode_bitrate", test_case_name,
-               video_bwe_stats.actual_encode_bitrate / kBitsInByte,
-               "bytesPerSecond");
-  ReportResult("target_encode_bitrate", test_case_name,
-               video_bwe_stats.target_encode_bitrate / kBitsInByte,
                "bytesPerSecond");
 }
 

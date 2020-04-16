@@ -40,6 +40,7 @@ if (!build_with_chromium) {
         ":rtc_unittests",
         ":slow_tests",
         ":video_engine_tests",
+        ":voip_unittests",
         ":webrtc_nonparallel_tests",
         ":webrtc_perf_tests",
         "common_audio:common_audio_unittests",
@@ -274,6 +275,10 @@ config("common_config") {
 
   if (rtc_disable_metrics) {
     defines += [ "RTC_DISABLE_METRICS" ]
+  }
+
+  if (rtc_exclude_transient_suppressor) {
+    defines += [ "WEBRTC_EXCLUDE_TRANSIENT_SUPPRESSOR" ]
   }
 
   cflags = []
@@ -542,6 +547,7 @@ if (rtc_include_tests) {
       "rtc_base:weak_ptr_unittests",
       "rtc_base/experiments:experiments_unittests",
       "rtc_base/synchronization:sequence_checker_unittests",
+      "rtc_base/task_utils:pending_task_safety_flag_unittests",
       "rtc_base/task_utils:to_queued_task_unittests",
       "sdk:sdk_tests",
       "test:rtp_test_utils",
@@ -672,6 +678,14 @@ if (rtc_include_tests) {
       deps += [ "//testing/android/native_test:native_test_support" ]
       shard_timeout = 900
     }
+  }
+
+  rtc_test("voip_unittests") {
+    testonly = true
+    deps = [
+      "audio/voip/test:audio_egress_unittests",
+      "test:test_main",
+    ]
   }
 }
 

@@ -714,15 +714,11 @@ struct VideoMediaInfo {
   void Clear() {
     senders.clear();
     receivers.clear();
-    bw_estimations.clear();
     send_codecs.clear();
     receive_codecs.clear();
   }
   std::vector<VideoSenderInfo> senders;
   std::vector<VideoReceiverInfo> receivers;
-  // Deprecated.
-  // TODO(holmer): Remove once upstream projects no longer use this.
-  std::vector<BandwidthEstimationInfo> bw_estimations;
   RtpCodecParametersMap send_codecs;
   RtpCodecParametersMap receive_codecs;
 };
@@ -749,6 +745,10 @@ struct RtpParameters {
 
   std::vector<Codec> codecs;
   std::vector<webrtc::RtpExtension> extensions;
+  // For a send stream this is true if we've neogtiated a send direction,
+  // for a receive stream this is true if we've negotiated a receive direction.
+  bool is_stream_active = true;
+
   // TODO(pthatcher): Add streams.
   RtcpParameters rtcp;
 
